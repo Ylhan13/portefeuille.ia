@@ -1,0 +1,17 @@
+{
+  "description": "Compte-titres ordinaire VIRTUEL - simulation, aucun ordre reel",
+  "devise_reference": "EUR",
+  "capital_initial_eur": 2500.0,
+  "date_creation": "2026-10-29",
+  "date_fin_prevue": "2026-11-27",
+  "statut": "actif",
+  "derniere_session": null,
+  "liquidites_eur": 2500.0,
+  "positions": [],
+  "benchmark": {
+    "ticker": "EUNL.DE",
+    "nom": "iShares Core MSCI World UCITS ETF USD (Acc) - Xetra, EUR",
+    "cours_depart": null,
+    "date_depart": null
+  }
+}
