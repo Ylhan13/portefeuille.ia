@@ -8,4 +8,4 @@ Simulation d'un mois de gestion d'un compte-titres ordinaire **virtuel** de 2 50
 - `state/history.csv` : valeur du portefeuille et du benchmark à chaque session.
 - `state/prices.csv` : chaque cours utilisé, avec source et horodatage.
 - `reports/` : un rapport par session, plus le rapport final.
-- `tools/pf.py` : récupération des cours et calculs (frais, change, PRU, valorisation).
+- `tools/pf.py` : calculs et contrôles (frais, change, PRU, valorisation, horaires) à partir des cours relevés sur le web.

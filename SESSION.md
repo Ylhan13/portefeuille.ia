@@ -11,9 +11,9 @@ TZ=Europe/Paris date '+%Y-%m-%d %H:%M %A'; date -u '+%Y-%m-%dT%H:%M:%SZ'
 ```
 
 - Heure de Paris avant 15h → `matin`, sinon `soir`. Identifiant de session : `AAAA-MM-JJ-matin` ou `AAAA-MM-JJ-soir` (date de Paris). On l'appelle `$S` ci-dessous.
-- `git pull --rebase` pour partir de l'état le plus récent.
+- `git fetch origin main && git checkout -B main origin/main` pour partir de l'état le plus récent.
 - Lis `state/portfolio.json`. Si `statut` vaut `termine` : **arrête-toi immédiatement**, sans rien écrire ni committer.
-- Si `reports/$S.md` existe déjà : cette session a déjà eu lieu, arrête-toi sans rien écrire.
+- Si `$S` est déjà présent dans `state/history.csv` : cette session a déjà eu lieu, arrête-toi sans rien écrire. Un rapport d'échec sans ligne d'historique est remplacé.
 
 ## 1. Lire l'état
 
@@ -30,18 +30,22 @@ Avec WebSearch / WebFetch, couvre au minimum :
 
 Note les sources (titre, média, date) : elles iront dans le rapport.
 
-## 3. Cours et marchés ouverts
+## 3. Relever les cours sur le web
 
-L'outil `tools/pf.py` (Python 3, stdlib) récupère les cours réels sur Yahoo Finance et applique toutes les règles de calcul. Symboles au format Yahoo : `MC.PA`, `SAP.DE`, `ASML.AS`, `AAPL`, `7203.T`, `0700.HK`, `RELIANCE.NS`, `HSBA.L`…
+Cherche toi-même les cours avec WebSearch et WebFetch sur des pages publiques (bourses, médias financiers, courtiers). Aucune API. Si un site refuse l'accès, passe à un autre, sans chercher à déjouer le refus.
 
-```bash
-python3 tools/pf.py quote MC.PA AAPL      # cours, devise, place, horodatage, marche_ouvert
-python3 tools/pf.py fx USD JPY            # 1 EUR = x devise, taux du moment
+Écris chaque cours utilisé dans `/tmp/cours.json` : pour chaque valeur détenue ou visée, le benchmark `EUNL.DE` et chaque taux `EUR/XXX` nécessaire. Exemple :
+
+```json
+{"MC.PA": {"prix": 387.0, "devise": "EUR", "horodatage": "2026-11-02T08:20:00Z", "source": "Nom du site", "url": "https://...", "nom": "LVMH", "place": "EUROPE"},
+ "EUR/USD": {"prix": 1.1166, "devise": "USD", "horodatage": "2026-11-02T08:15:00Z", "source": "Nom du site", "url": "https://..."}}
 ```
 
-- `marche_ouvert` est vrai seulement si l'heure actuelle est dans la séance régulière du jour **et** que le cours a moins d'une heure. Sinon : **aucun ordre** sur cette valeur, quelle que soit ta conviction.
-- Repères en heure de Paris (hors jours fériés, à vérifier) : Europe 9h00–17h30 ; Londres 9h00–17h30 ; New York 15h30–22h00 (14h30–21h00 jusqu'au 1er novembre 2026) ; Tokyo 1h00–7h30 ; Hong Kong 2h30–9h00 ; Inde 4h45–11h00. À 9h15 sont ouverts : Europe, Londres, Inde (et Hong Kong est fermé). À 21h30 : New York (à partir du 2 novembre).
-- Si une valeur n'a pas de cours fiable (erreur, réponse vide, cours aberrant) : aucun ordre sur cette valeur. Ne jamais inventer ni estimer un cours.
+- `prix` et `horodatage` viennent de la page : recopie-les, ne les estime jamais. `horodatage` est converti en UTC. Si la page n'indique ni date ni heure, ce cours n'est pas fiable.
+- Prix en unité principale : convertis les pence de Londres en livres.
+- `place` parmi : EUROPE, LONDRES, NEWYORK, TORONTO, TOKYO, HONGKONG, SHANGHAI, SEOUL, INDE, SYDNEY.
+- Pour un ordre, recoupe le cours avec une seconde source quand c'est possible. Si l'écart dépasse 1 %, aucun ordre sur cette valeur. Sans cours fiable, aucun ordre sur cette valeur.
+- Vérifie par la recherche qu'aucun jour férié ne ferme la place : l'outil contrôle les jours et heures, pas les fériés.
 
 ## 4. Décider
 
@@ -58,20 +62,21 @@ Règles :
 Toujours d'abord à blanc, puis pour de vrai :
 
 ```bash
-python3 tools/pf.py trade buy  AAPL 3 --session $S --reason "justification courte" --dry-run
-python3 tools/pf.py trade buy  AAPL 3 --session $S --reason "justification courte"
-python3 tools/pf.py trade sell MC.PA 1 --session $S --reason "justification courte"
+python3 tools/pf.py trade buy AAPL 3 --cours /tmp/cours.json --session $S --reason "justification courte" --dry-run
+python3 tools/pf.py trade buy AAPL 3 --cours /tmp/cours.json --session $S --reason "justification courte"
 ```
 
-L'outil refuse l'ordre si le marché est fermé, le cours absent ou trop ancien, les liquidités ou la quantité insuffisantes. Il met à jour `state/portfolio.json` (liquidités, quantité, PRU en EUR frais inclus), ajoute la ligne à `state/transactions.csv` et enregistre le cours et le taux utilisés, avec source et horodatage, dans `state/prices.csv`. **Ne modifie jamais ces fichiers à la main.** Si un ordre est refusé, ne le force pas : note-le dans le rapport.
+L'outil refuse l'ordre si la place est fermée, si le cours a plus de 60 minutes, si le taux de change a plus de 24 heures, ou si les liquidités ou la quantité sont insuffisantes. Il met à jour `state/portfolio.json`, `state/transactions.csv` et `state/prices.csv`. **Ne modifie jamais ces fichiers à la main.** Si un ordre est refusé, ne le force pas et ne change pas l'horodatage : note-le dans le rapport.
 
 ## 6. Valoriser
 
 ```bash
-python3 tools/pf.py value --session $S
+python3 tools/pf.py value --cours /tmp/cours.json --session $S
 ```
 
-Valorise au dernier cours réel (même si le marché est fermé), au taux de change moyen, compare au benchmark (ETF MSCI World `EUNL.DE`, base 2 500 € au premier relevé), ajoute la ligne à `state/history.csv` et imprime les tableaux Valeur et Positions à recopier dans le rapport. Lance-le une seule fois, après les ordres.
+Valorise au dernier cours relevé (même si le marché est fermé), au taux de change sans frais, compare au benchmark (ETF MSCI World `EUNL.DE`, base 2 500 € au premier relevé), ajoute la ligne à `state/history.csv` et imprime les tableaux à recopier dans le rapport. Lance-le une seule fois, après les ordres. Si un cours manque pour une position, l'outil s'arrête : cherche un autre site ; sans cours, applique « En cas de problème ».
+
+Dans le rapport, indique pour chaque cours sa source et son horodatage.
 
 ## 7. Écrire `reports/$S.md`
 
@@ -101,8 +106,8 @@ _Simulation : portefeuille virtuel, aucun ordre réel. Heure de la session : HH:
 
 ## 8. Fin du mois
 
-La période va de la première session (2026-10-29 matin) au **vendredi 2026-11-27 soir** (`date_fin_prevue` dans `portfolio.json`). Lors de la session `2026-11-27-soir`, après le rapport de session :
-- Écris `reports/2026-11-27-final.md` : bilan complet (valeur finale, performance € et %, comparaison au benchmark, courbe de valeur sous forme de tableau tiré de `history.csv`, frais totaux payés, nombre d'ordres, performance par ligne réalisée et latente), les meilleures et les pires décisions avec chiffres, et les leçons.
+La période va de la première session (2026-10-31 matin) au **lundi 2026-11-30 soir** (`date_fin_prevue` dans `portfolio.json`). Lors de la session `2026-11-30-soir`, après le rapport de session :
+- Écris `reports/2026-11-30-final.md` : bilan complet (valeur finale, performance € et %, comparaison au benchmark, courbe de valeur sous forme de tableau tiré de `history.csv`, frais totaux payés, nombre d'ordres, performance par ligne réalisée et latente), les meilleures et les pires décisions avec chiffres, et les leçons.
 - Passe `statut` à `termine` dans `state/portfolio.json` (seule modification manuelle autorisée de ce fichier). Toutes les sessions suivantes s'arrêteront à l'étape 0.
 - Si l'outil `RemoteTrigger` est disponible, désactive les deux routines « Portefeuille IA – matin » et « Portefeuille IA – soir » (`enabled: false`). Sinon, indique à la fin du rapport final qu'elles doivent être désactivées sur https://claude.ai/code/routines.
 
@@ -118,5 +123,5 @@ Si le push est rejeté : `git pull --rebase` puis `git push` à nouveau. Ne forc
 
 ## En cas de problème
 
-- Accès réseau aux cours impossible : n'invente rien. Écris quand même le rapport en indiquant l'erreur exacte, sans ordre ni ligne d'historique, et commit/push.
+- Aucun cours fiable pour une valeur : aucun ordre sur cette valeur, sans rien inventer. Si la valorisation est impossible, écris le rapport avec l'explication, sans ligne d'historique, et commit/push.
 - Une étape échoue : décris l'échec dans le rapport plutôt que de le contourner.

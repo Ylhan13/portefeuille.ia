@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Outil du portefeuille VIRTUEL (simulation, aucun ordre reel). Python 3, stdlib uniquement.
+"""Calculs du portefeuille VIRTUEL (simulation, aucun ordre reel). Python 3, stdlib. Aucun acces reseau.
 
-  python3 tools/pf.py check                         test reseau : 3 actions + EUR/USD
-  python3 tools/pf.py quote SYM [SYM...]            cours (sans enregistrement)
-  python3 tools/pf.py fx USD [GBP ...]              taux EUR/devise (1 EUR = x devise)
-  python3 tools/pf.py trade buy|sell SYM QTE --session S --reason "..." [--dry-run]
-  python3 tools/pf.py value --session S [--dry-run] valorisation + history.csv + tableaux markdown
+Les cours sont releves par le gerant sur le web et ecrits dans un fichier JSON :
+  {"MC.PA": {"prix": 387.0, "devise": "EUR", "horodatage": "2026-11-02T08:20:00Z", "source": "Boursorama", "url": "https://...",
+             "nom": "LVMH", "place": "EUROPE"},
+   "EUR/USD": {"prix": 1.1166, "devise": "USD", "horodatage": "...", "source": "...", "url": "..."}}
 
-Symboles au format Yahoo Finance : MC.PA, SAP.DE, AAPL, 7203.T, 0700.HK, RELIANCE.NS, ...
+  python3 tools/pf.py trade buy|sell SYM QTE --cours F --session S --reason "..." [--dry-run]
+  python3 tools/pf.py value --cours F --session S [--dry-run]
 """
-import argparse, csv, json, os, sys, time, urllib.error, urllib.parse, urllib.request
-from datetime import datetime, timezone
+import argparse, csv, json, os, sys
+from datetime import datetime, time as dtime, timezone
+from zoneinfo import ZoneInfo
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PF = os.path.join(ROOT, "state", "portfolio.json")
@@ -19,78 +20,69 @@ HIST = os.path.join(ROOT, "state", "history.csv")
 PRICES = os.path.join(ROOT, "state", "prices.csv")
 
 FEE_RATE, FEE_MIN, FX_FEE = 0.001, 1.0, 0.0025
-MAX_AGE_OPEN = 60 * 60  # un cours plus vieux qu'une heure n'est pas exploitable pour un ordre
-UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
-SUBUNITS = {"GBp": ("GBP", 100), "GBX": ("GBP", 100), "ZAc": ("ZAR", 100), "ILA": ("ILS", 100)}
+MAX_AGE_ORDRE_MIN = 60  # un cours plus vieux n'est pas exploitable pour un ordre
+MAX_AGE_CHANGE_H = 24
+PLACES = {"EUROPE": ("Europe/Paris", (9, 0), (17, 30)), "LONDRES": ("Europe/London", (8, 0), (16, 30)),
+          "NEWYORK": ("America/New_York", (9, 30), (16, 0)), "TORONTO": ("America/Toronto", (9, 30), (16, 0)),
+          "TOKYO": ("Asia/Tokyo", (9, 0), (15, 30)), "HONGKONG": ("Asia/Hong_Kong", (9, 30), (16, 0)),
+          "SHANGHAI": ("Asia/Shanghai", (9, 30), (15, 0)), "SEOUL": ("Asia/Seoul", (9, 0), (15, 30)),
+          "INDE": ("Asia/Kolkata", (9, 15), (15, 30)), "SYDNEY": ("Australia/Sydney", (10, 0), (16, 0))}
 
 
-def iso(ts):
-    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def now():
+    return datetime.now(timezone.utc)
 
 
-def now_iso():
-    return iso(time.time())
+def iso(d):
+    return d.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def http_json(url):
-    for attempt in range(4):
-        time.sleep(3)  # requetes espacees : Yahoo repond 429 aux rafales
-        req = urllib.request.Request(url, headers=UA)
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            if e.code != 429 or attempt == 3:
-                raise
-            time.sleep(30 * (attempt + 1))
+def load_cours(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
-def quote(symbol):
-    """Dernier cours reel. Leve une exception si aucun cours fiable : alors, aucun ordre."""
-    err = None
-    for host in ("query1", "query2"):
-        url = f"https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}?interval=1m&range=1d"
-        try:
-            m = http_json(url)["chart"]["result"][0]["meta"]
-        except Exception as e:
-            err = e
-            continue
-        p, t = m.get("regularMarketPrice"), m.get("regularMarketTime")
-        if p is None or t is None:
-            err = ValueError("reponse sans cours")
-            continue
-        cur = m.get("currency")
-        if cur in SUBUNITS:
-            cur, div = SUBUNITS[cur]
-            p = p / div
-        reg = (m.get("currentTradingPeriod") or {}).get("regular") or {}
-        now = time.time()
-        is_open = bool(reg) and reg["start"] <= now < reg["end"] and now - t < MAX_AGE_OPEN
-        return {"symbole": symbol, "prix": float(p), "devise": cur,
-                "place": m.get("fullExchangeName") or m.get("exchangeName"),
-                "nom": m.get("longName") or m.get("shortName") or symbol,
-                "horodatage_cours": iso(t), "age_min": round((now - t) / 60, 1),
-                "marche_ouvert": is_open,
-                "seance_utc": f"{iso(reg['start'])} -> {iso(reg['end'])}" if reg else None,
-                "source": "Yahoo Finance chart API", "url": url}
-    raise RuntimeError(f"{symbol} : aucun cours fiable ({err})")
+def get(cours, sym):
+    """Cours releve et verifie. Sans cours complet : aucun ordre."""
+    q = cours.get(sym)
+    if not q:
+        sys.exit(f"REFUS : aucun cours releve pour {sym}")
+    for k in ("prix", "devise", "horodatage", "source", "url"):
+        if not q.get(k):
+            sys.exit(f"REFUS : {sym} sans {k}")
+    if float(q["prix"]) <= 0:
+        sys.exit(f"REFUS : prix invalide pour {sym}")
+    t = datetime.fromisoformat(q["horodatage"].replace("Z", "+00:00"))
+    if t.tzinfo is None:
+        sys.exit(f"REFUS : horodatage de {sym} sans fuseau")
+    age = (now() - t).total_seconds() / 60
+    if age < -5:
+        sys.exit(f"REFUS : horodatage futur pour {sym}")
+    return dict(q, symbole=sym, prix=float(q["prix"]), age_min=age)
 
 
-def fx(cur):
-    """Taux EUR/devise du moment (1 EUR = x devise)."""
+def fx(cours, cur):
+    """Taux EUR/devise (1 EUR = x devise)."""
     if cur == "EUR":
-        return {"symbole": "EUR", "prix": 1.0, "horodatage_cours": now_iso(), "source": "identite", "url": ""}
-    q = quote(f"EUR{cur}=X")
-    if q["age_min"] > 24 * 60:
-        raise RuntimeError(f"taux EUR{cur} trop ancien ({q['horodatage_cours']})")
-    return q
+        return {"symbole": "EUR", "prix": 1.0, "horodatage": iso(now()), "source": "identite", "url": "", "devise": "EUR", "age_min": 0}
+    r = get(cours, f"EUR/{cur}")
+    if r["age_min"] > MAX_AGE_CHANGE_H * 60:
+        sys.exit(f"REFUS : taux EUR/{cur} trop ancien ({r['horodatage']})")
+    return r
 
 
-def log_price(session, usage, q, devise=None):
+def ouvert(place):
+    if place not in PLACES:
+        sys.exit(f"REFUS : place inconnue {place} (choix : {', '.join(PLACES)})")
+    tz, a, b = PLACES[place]
+    t = now().astimezone(ZoneInfo(tz))
+    return t.weekday() < 5 and dtime(*a) <= t.time() < dtime(*b)
+
+
+def log_price(session, usage, q, ouv=""):
     with open(PRICES, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([now_iso(), session, usage, q["symbole"], q.get("place", ""),
-                                devise or q.get("devise", ""), f"{q['prix']:.6f}", q["horodatage_cours"],
-                                q.get("marche_ouvert", ""), q["source"], q["url"]])
+        csv.writer(f).writerow([iso(now()), session, usage, q["symbole"], q.get("place", ""), q["devise"],
+                                f"{q['prix']:.6f}", q["horodatage"], ouv, q["source"], q["url"]])
 
 
 def load():
@@ -104,48 +96,22 @@ def save(pf):
         f.write("\n")
 
 
-def broker_fee(amount_eur):
-    return max(FEE_MIN, round(amount_eur * FEE_RATE, 2))
-
-
-def cmd_check(_):
-    ok = True
-    for s in ("MC.PA", "AAPL", "7203.T", "EURUSD=X"):
-        try:
-            q = quote(s)
-            print(f"OK  {s:10} {q['prix']:>12.4f} {q['devise']}  cours du {q['horodatage_cours']}  ouvert={q['marche_ouvert']}  ({q['place']})")
-        except Exception as e:
-            ok = False
-            print(f"ECHEC {s} : {e}")
-    sys.exit(0 if ok else 1)
-
-
-def cmd_quote(a):
-    for s in a.symbols:
-        try:
-            print(json.dumps(quote(s), ensure_ascii=False))
-        except Exception as e:
-            print(json.dumps({"symbole": s, "erreur": str(e)}, ensure_ascii=False))
-
-
-def cmd_fx(a):
-    for c in a.currencies:
-        q = fx(c)
-        print(f"1 EUR = {q['prix']:.6f} {c}  (cours du {q['horodatage_cours']}, {q['source']})")
-
-
 def cmd_trade(a):
     if a.qty <= 0:
         sys.exit("quantite entiere strictement positive requise")
     pf = load()
-    q = quote(a.symbol)
-    if not q["marche_ouvert"]:
-        sys.exit(f"REFUS : marche ferme ou cours non frais pour {a.symbol} (cours du {q['horodatage_cours']}, seance {q['seance_utc']})")
-    r = fx(q["devise"])
+    cours = load_cours(a.cours)
+    q = get(cours, a.symbol)
+    place = q.get("place", "")
+    if not ouvert(place):
+        sys.exit(f"REFUS : place {place} fermee")
+    if q["age_min"] > MAX_AGE_ORDRE_MIN:
+        sys.exit(f"REFUS : cours de {a.symbol} trop ancien ({q['horodatage']})")
+    r = fx(cours, q["devise"])
     rate = r["prix"]
     gross = a.qty * q["prix"] / rate
     fx_fee = round(gross * FX_FEE, 2) if q["devise"] != "EUR" else 0.0
-    fee = broker_fee(gross)
+    fee = max(FEE_MIN, round(gross * FEE_RATE, 2))
     pos = next((p for p in pf["positions"] if p["ticker"] == a.symbol), None)
     pv = ""
     if a.side == "buy":
@@ -157,9 +123,8 @@ def cmd_trade(a):
             pos["pru_eur"] = round((pos["quantite"] * pos["pru_eur"] + net) / (pos["quantite"] + a.qty), 4)
             pos["quantite"] += a.qty
         else:
-            pos = {"ticker": a.symbol, "nom": q["nom"], "place": q["place"], "devise": q["devise"],
-                   "quantite": a.qty, "pru_eur": round(net / a.qty, 4), "date_achat": q["horodatage_cours"][:10]}
-            pf["positions"].append(pos)
+            pf["positions"].append({"ticker": a.symbol, "nom": q.get("nom", a.symbol), "place": place, "devise": q["devise"],
+                                    "quantite": a.qty, "pru_eur": round(net / a.qty, 4), "date_achat": iso(now())[:10]})
     else:
         if not pos or pos["quantite"] < a.qty:
             sys.exit("REFUS : quantite detenue insuffisante (pas de vente a decouvert)")
@@ -169,106 +134,92 @@ def cmd_trade(a):
         pos["quantite"] -= a.qty
         if pos["quantite"] == 0:
             pf["positions"].remove(pos)
-    summary = (f"{'ACHAT' if a.side == 'buy' else 'VENTE'} {a.qty} {a.symbol} @ {q['prix']:.4f} {q['devise']} "
-               f"(cours du {q['horodatage_cours']}) | taux 1 EUR = {rate:.6f} {q['devise']} | brut {gross:.2f} EUR | "
-               f"courtage {fee:.2f} | change {fx_fee:.2f} | net {net:.2f} EUR | liquidites apres {cash:.2f} EUR"
-               + (f" | PV realisee {pv:.2f} EUR" if pv != "" else ""))
+    sens = "ACHAT" if a.side == "buy" else "VENTE"
+    summary = (f"{sens} {a.qty} {a.symbol} @ {q['prix']:.4f} {q['devise']} (cours du {q['horodatage']}, {q['source']}) | "
+               f"taux 1 EUR = {rate:.6f} {q['devise']} | brut {gross:.2f} EUR | courtage {fee:.2f} | change {fx_fee:.2f} | "
+               f"net {net:.2f} EUR | liquidites apres {cash:.2f} EUR" + (f" | PV realisee {pv:.2f} EUR" if pv != "" else ""))
     if a.dry_run:
         print("SIMULATION (rien n'est ecrit) : " + summary)
         return
     pf["liquidites_eur"] = cash
     save(pf)
-    log_price(a.session, "ordre", q)
+    log_price(a.session, "ordre", q, True)
     if q["devise"] != "EUR":
-        log_price(a.session, "change ordre", r, q["devise"])
+        log_price(a.session, "change ordre", r)
     with open(TX, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([now_iso(), a.session, "ACHAT" if a.side == "buy" else "VENTE", a.symbol, q["nom"],
-                                q["place"], q["devise"], a.qty, f"{q['prix']:.4f}", q["horodatage_cours"], q["source"],
-                                f"{rate:.6f}", r["source"], f"{gross:.2f}", f"{fee:.2f}", f"{fx_fee:.2f}", f"{net:.2f}",
-                                pv, f"{cash:.2f}", a.reason])
+        csv.writer(f).writerow([iso(now()), a.session, sens, a.symbol, q.get("nom", a.symbol), place, q["devise"], a.qty,
+                                f"{q['prix']:.4f}", q["horodatage"], q["source"], f"{rate:.6f}", r["source"], f"{gross:.2f}",
+                                f"{fee:.2f}", f"{fx_fee:.2f}", f"{net:.2f}", pv, f"{cash:.2f}", a.reason])
     print("EXECUTE : " + summary)
 
 
 def cmd_value(a):
     pf = load()
+    cours = load_cours(a.cours)
     rates, rows, titres = {}, [], 0.0
     for p in pf["positions"]:
-        q = quote(p["ticker"])
+        q = get(cours, p["ticker"])
         if q["devise"] not in rates:
-            rates[q["devise"]] = fx(q["devise"])
-        rate = rates[q["devise"]]["prix"]
-        val = p["quantite"] * q["prix"] / rate
+            rates[q["devise"]] = fx(cours, q["devise"])
+        val = p["quantite"] * q["prix"] / rates[q["devise"]]["prix"]
         titres += val
         rows.append((p, q, val, val - p["quantite"] * p["pru_eur"]))
-        if not a.dry_run:
-            log_price(a.session, "valorisation", q)
-    if not a.dry_run:
-        for c, r in rates.items():
-            if c != "EUR":
-                log_price(a.session, "change valorisation", r, c)
     cash = pf["liquidites_eur"]
     total = cash + titres
     cap = pf["capital_initial_eur"]
-
     bm = pf["benchmark"]
-    bq = quote(bm["ticker"])
+    bq = get(cours, bm["ticker"])
     if bm["cours_depart"] is None:
-        bm["cours_depart"], bm["date_depart"] = bq["prix"], bq["horodatage_cours"]
+        bm["cours_depart"], bm["date_depart"] = bq["prix"], bq["horodatage"]
     bm_val = cap * bq["prix"] / bm["cours_depart"]
-
-    prev = None
-    if os.path.exists(HIST):
-        with open(HIST, encoding="utf-8") as f:
-            hist = list(csv.DictReader(f))
-        prev = float(hist[-1]["valeur_totale_eur"]) if hist else None
+    with open(HIST, encoding="utf-8") as f:
+        hist = list(csv.DictReader(f))
+    prev = float(hist[-1]["valeur_totale_eur"]) if hist else None
     var = total - prev if prev is not None else 0.0
-
-    print(f"## Valeur\n")
-    print(f"| Indicateur | Valeur |\n|---|---|")
+    print("## Valeur\n")
+    print("| Indicateur | Valeur |\n|---|---|")
     print(f"| Valeur totale | {total:,.2f} EUR |")
     print(f"| Liquidites | {cash:,.2f} EUR ({cash / total * 100:.1f} %) |")
     print(f"| Performance depuis le debut | {total - cap:+,.2f} EUR ({(total / cap - 1) * 100:+.2f} %) |")
     print(f"| Variation depuis la session precedente | {var:+,.2f} EUR ({(var / prev * 100) if prev else 0:+.2f} %) |")
-    print(f"| Benchmark {bm['ticker']} (base {cap:,.0f} EUR) | {bm_val:,.2f} EUR ({(bm_val / cap - 1) * 100:+.2f} %), cours {bq['prix']:.4f} du {bq['horodatage_cours']} |")
-    print(f"| Ecart vs benchmark | {(total / cap - bm_val / cap) * 100:+.2f} points |\n")
+    print(f"| Benchmark {bm['ticker']} (base {cap:,.0f} EUR) | {bm_val:,.2f} EUR ({(bm_val / cap - 1) * 100:+.2f} %), cours {bq['prix']:.4f} du {bq['horodatage']} ({bq['source']}) |")
+    print(f"| Ecart vs benchmark | {(total - bm_val) / cap * 100:+.2f} points |\n")
     print("## Positions\n")
     if rows:
-        print("| Titre | Place | Qte | Cours | Cours du (UTC) | Valeur EUR | PRU EUR | +/- latente EUR | +/- % | Poids |")
-        print("|---|---|---:|---:|---|---:|---:|---:|---:|---:|")
+        print("| Titre | Place | Qte | Cours | Cours du (UTC) | Source | Valeur EUR | PRU EUR | +/- latente EUR | +/- % | Poids |")
+        print("|---|---|---:|---:|---|---|---:|---:|---:|---:|---:|")
         for p, q, val, pnl in rows:
             cost = p["quantite"] * p["pru_eur"]
-            print(f"| {p['ticker']} {p['nom']} | {p['place']} | {p['quantite']} | {q['prix']:.4f} {q['devise']} | {q['horodatage_cours']} | "
+            print(f"| {p['ticker']} {p['nom']} | {p['place']} | {p['quantite']} | {q['prix']:.4f} {q['devise']} | {q['horodatage']} | {q['source']} | "
                   f"{val:,.2f} | {p['pru_eur']:.4f} | {pnl:+,.2f} | {pnl / cost * 100:+.2f} % | {val / total * 100:.1f} % |")
-        for c, r in rates.items():
-            if c != "EUR":
-                print(f"\nTaux utilise : 1 EUR = {r['prix']:.6f} {c} (cours du {r['horodatage_cours']}, {r['source']}). Valorisation au taux moyen, hors frais de sortie.")
     else:
         print("Aucune position : 100 % liquidites.")
-
     if a.dry_run:
         return
+    for p, q, _, _ in rows:
+        log_price(a.session, "valorisation", q)
+    for c, r in rates.items():
+        if c != "EUR":
+            log_price(a.session, "change valorisation", r)
     log_price(a.session, "benchmark", bq)
     pf["derniere_session"] = a.session
     save(pf)
     with open(HIST, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([now_iso(), a.session, f"{total:.2f}", f"{cash:.2f}", f"{titres:.2f}",
-                                f"{total - cap:.2f}", f"{(total / cap - 1) * 100:.4f}", f"{var:.2f}",
-                                f"{(var / prev * 100) if prev else 0:.4f}", bm["ticker"], f"{bq['prix']:.4f}",
-                                f"{bm_val:.2f}", f"{(bm_val / cap - 1) * 100:.4f}"])
+        csv.writer(f).writerow([iso(now()), a.session, f"{total:.2f}", f"{cash:.2f}", f"{titres:.2f}", f"{total - cap:.2f}",
+                                f"{(total / cap - 1) * 100:.4f}", f"{var:.2f}", f"{(var / prev * 100) if prev else 0:.4f}",
+                                bm["ticker"], f"{bq['prix']:.4f}", f"{bm_val:.2f}", f"{(bm_val / cap - 1) * 100:.4f}"])
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
-    sp.add_parser("check").set_defaults(fn=cmd_check)
-    p = sp.add_parser("quote"); p.add_argument("symbols", nargs="+"); p.set_defaults(fn=cmd_quote)
-    p = sp.add_parser("fx"); p.add_argument("currencies", nargs="+"); p.set_defaults(fn=cmd_fx)
     p = sp.add_parser("trade")
     p.add_argument("side", choices=["buy", "sell"]); p.add_argument("symbol"); p.add_argument("qty", type=int)
-    p.add_argument("--session", required=True); p.add_argument("--reason", required=True)
+    p.add_argument("--cours", required=True); p.add_argument("--session", required=True); p.add_argument("--reason", required=True)
     p.add_argument("--dry-run", action="store_true"); p.set_defaults(fn=cmd_trade)
     p = sp.add_parser("value")
-    p.add_argument("--session", required=True); p.add_argument("--dry-run", action="store_true"); p.set_defaults(fn=cmd_value)
+    p.add_argument("--cours", required=True); p.add_argument("--session", required=True)
+    p.add_argument("--dry-run", action="store_true"); p.set_defaults(fn=cmd_value)
     a = ap.parse_args()
     a.fn(a)
 
