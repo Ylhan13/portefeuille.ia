@@ -9,7 +9,7 @@
 
 Symboles au format Yahoo Finance : MC.PA, SAP.DE, AAPL, 7203.T, 0700.HK, RELIANCE.NS, ...
 """
-import argparse, csv, json, os, sys, time, urllib.parse, urllib.request
+import argparse, csv, json, os, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -33,9 +33,16 @@ def now_iso():
 
 
 def http_json(url):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read().decode())
+    for attempt in range(4):
+        time.sleep(3)  # requetes espacees : Yahoo repond 429 aux rafales
+        req = urllib.request.Request(url, headers=UA)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or attempt == 3:
+                raise
+            time.sleep(30 * (attempt + 1))
 
 
 def quote(symbol):

@@ -96,3 +96,22 @@ ECHEC EURUSD=X : EURUSD=X : aucun cours fiable (HTTP Error 429: Too Many Request
 ```
 
 Conclusion : le réseau est désormais ouvert (plus de 403 du proxy, AAPL répond), mais Yahoo Finance limite le débit : 3 symboles sur 4 échouent avec `HTTP Error 429: Too Many Requests`. Conformément à la consigne, arrêt ici : étapes 2 et 3 non exécutées, SESSION.md et state/portfolio.json inchangés, aucune session, aucun ordre virtuel, aucun contournement.
+
+## Test après espacement des requêtes
+
+- Horodatage : lancé à 2026-10-30T22:25:40Z (23:25:40 heure de Paris, CET), terminé vers 22:49 UTC (≈ 24 min, du fait des pauses de reprise)
+- Modification de `tools/pf.py` : `urllib.error` importé ; `http_json` attend 3 s avant chaque requête et, sur HTTP 429, réessaie jusqu'à 4 fois par hôte avec des pauses de 30, 60 puis 90 s (soit jusqu'à 8 tentatives par symbole via query1 puis query2).
+- Commandes : `git fetch origin main && git checkout -B main origin/main`, puis `python3 tools/pf.py check`
+
+Sortie brute :
+
+```
+ECHEC MC.PA : MC.PA : aucun cours fiable (HTTP Error 429: Too Many Requests)
+OK  AAPL           344.6300 USD  cours du 2026-10-30T20:00:01Z  ouvert=False  (NasdaqGS)
+ECHEC 7203.T : 7203.T : aucun cours fiable (HTTP Error 429: Too Many Requests)
+ECHEC EURUSD=X : EURUSD=X : aucun cours fiable (HTTP Error 429: Too Many Requests)
+```
+
+Erreur exacte (MC.PA, 7203.T, EURUSD=X) : `HTTP Error 429: Too Many Requests`, renvoyée par Yahoo Finance sur query1 et query2 à chacune des tentatives, y compris après 30, 60 et 90 s d'attente. Seul AAPL répond.
+
+Conclusion : l'espacement des requêtes (3 s) et les reprises avec pause ne suffisent pas depuis cet environnement : 3 symboles sur 4 restent en 429. Le 429 semble lié à l'adresse sortante (ou à l'absence de cookie/crumb Yahoo) plutôt qu'aux seules rafales. Conformément à la consigne, arrêt ici : étapes 2 et 3 non exécutées, SESSION.md et state/portfolio.json inchangés, aucune session, aucun ordre virtuel, aucun contournement. Seuls `tools/pf.py` (modification demandée) et ce rapport sont modifiés.
