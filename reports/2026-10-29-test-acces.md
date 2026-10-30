@@ -80,3 +80,19 @@ ECHEC EURUSD=X : EURUSD=X : aucun cours fiable (<urlopen error Tunnel connection
 Diagnostic du proxy (`/__agentproxy/status`, `"selective": false`) : `connect_rejected` — « gateway answered 403 to CONNECT (policy denial or upstream failure) » pour `query1.finance.yahoo.com:443` et `query2.finance.yahoo.com:443` à 20:55:24Z. Contrôle `curl https://query1.finance.yahoo.com/...` : `CONNECT tunnel failed, response 403`.
 
 Conclusion : les 4 symboles échouent encore, même erreur qu'hier. Le changement de politique réseau n'est pas effectif dans cette session (ou Yahoo Finance reste refusé par la passerelle). Étapes 2 et 3 non exécutées : SESSION.md et state/portfolio.json inchangés, aucune session, aucun ordre virtuel, aucun contournement.
+
+## Test du 2026-10-30 après enregistrement du réseau (2e essai, réseau ouvert)
+
+- Horodatage : 2026-10-30T22:03:01Z (23:03:01 heure de Paris, CET)
+- Commandes : `git fetch origin main && git checkout -B main origin/main`, puis `python3 tools/pf.py check` (code de sortie 1)
+
+Sortie brute :
+
+```
+ECHEC MC.PA : MC.PA : aucun cours fiable (HTTP Error 429: Too Many Requests)
+OK  AAPL           344.6300 USD  cours du 2026-10-30T20:00:01Z  ouvert=False  (NasdaqGS)
+ECHEC 7203.T : 7203.T : aucun cours fiable (HTTP Error 429: Too Many Requests)
+ECHEC EURUSD=X : EURUSD=X : aucun cours fiable (HTTP Error 429: Too Many Requests)
+```
+
+Conclusion : le réseau est désormais ouvert (plus de 403 du proxy, AAPL répond), mais Yahoo Finance limite le débit : 3 symboles sur 4 échouent avec `HTTP Error 429: Too Many Requests`. Conformément à la consigne, arrêt ici : étapes 2 et 3 non exécutées, SESSION.md et state/portfolio.json inchangés, aucune session, aucun ordre virtuel, aucun contournement.
