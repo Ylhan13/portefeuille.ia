@@ -1,3 +1,4 @@
 horodatage_utc,session,valeur_totale_eur,liquidites_eur,valeur_titres_eur,perf_debut_eur,perf_debut_pct,variation_session_eur,variation_session_pct,benchmark_ticker,benchmark_cours,benchmark_valeur_eur,benchmark_perf_pct
 2026-10-30T23:15:15Z,2026-10-31-matin,2500.00,2500.00,0.00,0.00,0.0000,0.00,0.0000,EUNL.DE,129.6850,2500.00,0.0000
 2026-11-02T08:20:51Z,2026-11-02-matin,2497.00,1050.44,1446.56,-3.00,-0.1200,-3.00,-0.1200,EUNL.DE,129.6850,2500.00,0.0000
+2026-11-02T20:41:04Z,2026-11-02-soir,2498.30,1050.44,1447.86,-1.70,-0.0680,1.30,0.0521,EUNL.DE,129.9300,2504.72,0.1889
