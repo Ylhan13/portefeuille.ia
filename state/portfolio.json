@@ -5,8 +5,8 @@
   "date_creation": "2026-10-31",
   "date_fin_prevue": "2026-11-30",
   "statut": "actif",
-  "derniere_session": "2026-11-06-soir",
-  "liquidites_eur": 642.47,
+  "derniere_session": "2026-11-09-matin",
+  "liquidites_eur": 403.96,
   "positions": [
     {
       "ticker": "TTE.PA",
@@ -43,6 +43,15 @@
       "quantite": 5,
       "pru_eur": 128.974,
       "date_achat": "2026-11-03"
+    },
+    {
+      "ticker": "VIE.PA",
+      "nom": "Veolia Environnement",
+      "place": "EUROPE",
+      "devise": "EUR",
+      "quantite": 7,
+      "pru_eur": 34.0729,
+      "date_achat": "2026-11-09"
     }
   ],
   "benchmark": {
