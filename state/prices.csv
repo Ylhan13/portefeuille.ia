@@ -91,3 +91,9 @@ horodatage_releve_utc,session,usage,symbole,place,devise,prix,horodatage_cours_u
 2026-11-11T20:40:33Z,2026-11-11-soir,valorisation,EUNL.DE,EUROPE,EUR,130.955000,2026-11-11T16:36:05Z,,"Boursorama (Xetra, différé)",https://www.boursorama.com/bourse/trackers/cours/1zEUNL/
 2026-11-11T20:40:33Z,2026-11-11-soir,valorisation,VIE.PA,EUROPE,EUR,34.300000,2026-11-11T16:37:55Z,,"Boursorama (Euronext Paris, clôture)",https://www.boursorama.com/cours/1rPVIE/
 2026-11-11T20:40:33Z,2026-11-11-soir,benchmark,EUNL.DE,EUROPE,EUR,130.955000,2026-11-11T16:36:05Z,,"Boursorama (Xetra, différé)",https://www.boursorama.com/bourse/trackers/cours/1zEUNL/
+2026-11-12T08:18:23Z,2026-11-12-matin,valorisation,TTE.PA,EUROPE,EUR,79.440000,2026-11-12T08:15:13Z,,Boursorama (Euronext Paris),https://www.boursorama.com/cours/1rPTTE/
+2026-11-12T08:18:23Z,2026-11-12-matin,valorisation,SAN.PA,EUROPE,EUR,88.320000,2026-11-12T08:15:08Z,,Boursorama (Euronext Paris),https://www.boursorama.com/cours/1rPSAN/
+2026-11-12T08:18:23Z,2026-11-12-matin,valorisation,BN.PA,EUROPE,EUR,68.940000,2026-11-12T08:15:08Z,,Boursorama (Euronext Paris),https://www.boursorama.com/cours/1rPBN/
+2026-11-12T08:18:23Z,2026-11-12-matin,valorisation,EUNL.DE,EUROPE,EUR,130.765000,2026-11-12T08:16:42Z,,Tradegate (temps reel),https://www.tradegatebsx.com/orderbuch.php?isin=IE00B4L5Y983
+2026-11-12T08:18:23Z,2026-11-12-matin,valorisation,VIE.PA,EUROPE,EUR,34.420000,2026-11-12T08:14:55Z,,Boursorama (Euronext Paris),https://www.boursorama.com/cours/1rPVIE/
+2026-11-12T08:18:23Z,2026-11-12-matin,benchmark,EUNL.DE,EUROPE,EUR,130.765000,2026-11-12T08:16:42Z,,Tradegate (temps reel),https://www.tradegatebsx.com/orderbuch.php?isin=IE00B4L5Y983
